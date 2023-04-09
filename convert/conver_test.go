@@ -27,7 +27,7 @@ block "label_one" "label_two" {
 	}
 }`
 
-	convertedBytes, err := Bytes([]byte(input), "", Options{})
+	convertedBytes, _, err := Bytes([]byte(input), "", Options{})
 	if err != nil {
 		t.Fatal("parse bytes:", err)
 	}
@@ -52,7 +52,7 @@ block "label_one" {
 	}
 }`
 
-	convertedBytes, err := Bytes([]byte(input), "", Options{})
+	convertedBytes, _, err := Bytes([]byte(input), "", Options{})
 	if err != nil {
 		t.Fatal("parse bytes:", err)
 	}
@@ -83,7 +83,7 @@ block "label_one" {
 	}
 }`
 
-	convertedBytes, err := Bytes([]byte(input), "", Options{})
+	convertedBytes, _, err := Bytes([]byte(input), "", Options{})
 	if err != nil {
 		t.Fatal("parse bytes:", err)
 	}
@@ -221,7 +221,7 @@ variable "region" {
 	}
 }`
 
-	convertedBytes, err := Bytes([]byte(input), "", Options{})
+	convertedBytes, _, err := Bytes([]byte(input), "", Options{})
 	if err != nil {
 		t.Fatal("parse bytes:", err)
 	}
@@ -259,7 +259,7 @@ func TestSimplify(t *testing.T) {
 	]
 }`
 
-	convertedBytes, err := Bytes([]byte(input), "", Options{Simplify: true})
+	convertedBytes, _, err := Bytes([]byte(input), "", Options{Simplify: true})
 	if err != nil {
 		t.Fatal("parse bytes:", err)
 	}
@@ -276,7 +276,7 @@ func TestEndOfFileExpr(t *testing.T) {
 	"inputs": "${merge(\n\t\t{},\n\t\tfoo().inputs\n\t)}"
 }`
 
-	convertedBytes, err := Bytes([]byte(input), "", Options{})
+	convertedBytes, _, err := Bytes([]byte(input), "", Options{})
 	if err != nil {
 		t.Fatal("parse bytes:", err)
 	}
@@ -295,7 +295,7 @@ func TestBlocksWithAndWithoutLabels(t *testing.T) {
 		key = 7
 	}`
 
-	_, err := Bytes([]byte(input), "", Options{})
+	_, _, err := Bytes([]byte(input), "", Options{})
 	if err == nil {
 		t.Fatal("invalid HCL should have returned an error:", err)
 	}

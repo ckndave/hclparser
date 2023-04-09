@@ -18,46 +18,52 @@ type Options struct {
 
 // Bytes takes the contents of an HCL file, as bytes, and converts
 // them into a JSON representation of the HCL file.
-func Bytes(bytes []byte, filename string, options Options) ([]byte, error) {
+func Bytes(bytes []byte, filename string, options Options) ([]byte, []byte, error) {
 	file, diags := hclsyntax.ParseConfig(bytes, filename, hcl.Pos{Line: 1, Column: 1})
 	if diags.HasErrors() {
-		return nil, fmt.Errorf("parse config: %v", diags.Errs())
+		return nil, nil, fmt.Errorf("parse config: %v", diags.Errs())
 	}
 
-	hclBytes, err := File(file, options)
+	hclBytes, lineBytes, err := File(file, options)
 	if err != nil {
-		return nil, fmt.Errorf("convert to HCL: %w", err)
+		return nil, nil, fmt.Errorf("convert to HCL: %w", err)
 	}
 
-	return hclBytes, nil
+	return hclBytes, lineBytes, nil
 }
 
 // File takes an HCL file and converts it to its JSON representation.
-func File(file *hcl.File, options Options) ([]byte, error) {
-	convertedFile, err := ConvertFile(file, options)
+func File(file *hcl.File, options Options) ([]byte, []byte, error) {
+	convertedFile, lineObj, err := ConvertFile(file, options)
 	if err != nil {
-		return nil, fmt.Errorf("convert file: %w", err)
+		return nil, nil, fmt.Errorf("convert file: %w", err)
 	}
 
 	jsonBytes, err := json.Marshal(convertedFile)
 	if err != nil {
-		return nil, fmt.Errorf("marshal json: %w", err)
+		return nil, nil, fmt.Errorf("marshal json: %w", err)
 	}
 
-	return jsonBytes, nil
+	lineBytes, err := json.Marshal(lineObj)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal json: %w", err)
+	}
+
+	return jsonBytes, lineBytes, nil
 }
 
 type jsonObj map[string]interface{}
+type lineObj = map[string]interface{}
 
 type converter struct {
 	bytes   []byte
 	options Options
 }
 
-func ConvertFile(file *hcl.File, options Options) (jsonObj, error) {
+func ConvertFile(file *hcl.File, options Options) (jsonObj, lineObj, error) {
 	body, ok := file.Body.(*hclsyntax.Body)
 	if !ok {
-		return nil, fmt.Errorf("convert file body to body type")
+		return nil, nil, fmt.Errorf("convert file body to body type")
 	}
 
 	c := converter{
@@ -65,32 +71,68 @@ func ConvertFile(file *hcl.File, options Options) (jsonObj, error) {
 		options: options,
 	}
 
-	out, err := c.convertBody(body)
+	out, line, err := c.convertBody(body)
 	if err != nil {
-		return nil, fmt.Errorf("convert body: %w", err)
+		return nil, nil, fmt.Errorf("convert body: %w", err)
 	}
 
-	return out, nil
+	return out, line, nil
 }
 
-func (c *converter) convertBody(body *hclsyntax.Body) (jsonObj, error) {
-	out := make(jsonObj)
+func (c *converter) convertBody(body *hclsyntax.Body) (jsonObj, lineObj, error) {
+	cfg := make(jsonObj)
+	lcfg := make(jsonObj)
 
 	for _, block := range body.Blocks {
-		if err := c.convertBlock(block, out); err != nil {
-			return nil, fmt.Errorf("convert block: %w", err)
+		var (
+			bcfg  = make(jsonObj) // block resource config
+			blcfg = make(lineObj) // block resource line config
+		)
+
+		if err := c.convertBlock(block, bcfg, blcfg); err != nil {
+			return nil, nil, fmt.Errorf("convert block: %w", err)
+		}
+
+		blockConfig := bcfg[block.Type].(jsonObj)
+		lineCfg := blcfg[block.Type].(lineObj)
+		if _, present := cfg[block.Type]; !present {
+			cfg[block.Type] = []jsonObj{blockConfig}
+			lcfg[block.Type] = []lineObj{lineCfg}
+		} else {
+			list := cfg[block.Type].([]jsonObj)
+			list = append(list, blockConfig)
+			cfg[block.Type] = list
+
+			lineList := lcfg[block.Type].([]lineObj)
+			lineList = append(lineList, lineCfg)
+			lcfg[block.Type] = lineList
 		}
 	}
 
 	var err error
 	for key, value := range body.Attributes {
-		out[key], err = c.convertExpression(value.Expr)
+		cfg[key], lcfg[key], err = c.convertExpression(value.Expr)
+		int, e := lcfg[key].(map[string]int)
+		if e {
+			int["__key__startIndex"] = value.NameRange.Start.Column
+			int["__key__endIndex"] = value.NameRange.End.Column
+			int["__key__line"] = value.NameRange.Start.Line
+		}
+		int1, e1 := lcfg[key].(map[string]map[string]interface{})
+		if e1 {
+			l := int1[key]
+			l["__key__startIndex"] = value.NameRange.Start.Column
+			l["__key__endIndex"] = value.NameRange.End.Column
+			l["__key__line"] = value.NameRange.Start.Line
+		}
 		if err != nil {
-			return nil, fmt.Errorf("convert expression: %w", err)
+			return nil, nil, fmt.Errorf("convert expression: %w", err)
 		}
 	}
-
-	return out, nil
+	lcfg["line"] = body.SrcRange.Start.Line
+	lcfg["startIndex"] = body.SrcRange.Start.Column
+	lcfg["endIndex"] = body.SrcRange.End.Column
+	return cfg, lcfg, nil
 }
 
 func (c *converter) rangeSource(r hcl.Range) string {
@@ -103,7 +145,7 @@ func (c *converter) rangeSource(r hcl.Range) string {
 	return string(c.bytes[r.Start.Byte:end])
 }
 
-func (c *converter) convertBlock(block *hclsyntax.Block, out jsonObj) error {
+func (c *converter) convertBlock(block *hclsyntax.Block, cfg jsonObj, lcfg lineObj) error {
 	key := block.Type
 	for _, label := range block.Labels {
 
@@ -120,82 +162,140 @@ func (c *converter) convertBlock(block *hclsyntax.Block, out jsonObj) error {
 		// When the label exists, move onto the next label reference.
 		// When a label does not exist, create the label in the output and set that as the next label reference
 		// in order to append (potential) labels to it.
-		if _, exists := out[key]; exists {
+		if _, exists := cfg[key]; exists {
 			var ok bool
-			out, ok = out[key].(jsonObj)
+			cfg, ok = cfg[key].(jsonObj)
 			if !ok {
 				return fmt.Errorf("Unable to convert Block to JSON: %v.%v", block.Type, strings.Join(block.Labels, "."))
 			}
+
+			if innerLineObj := lcfg[key]; exists {
+				lcfg, ok = innerLineObj.(lineObj)
+				if !ok {
+					return fmt.Errorf("unable to convert Block to JSON: %v.%v", block.Type, strings.Join(block.Labels, "."))
+				}
+			}
 		} else {
-			out[key] = make(jsonObj)
-			out = out[key].(jsonObj)
+			// cfg[key] = make(jsonObj)
+			// cfg = cfg[key].(jsonObj)
+
+			var (
+				obj  = make(jsonObj)
+				lobj = make(lineObj)
+			)
+
+			cfg[key] = obj
+			cfg = obj
+
+			lcfg[key] = lobj
+			lcfg = lobj
+
 		}
 
 		key = label
 	}
 
-	value, err := c.convertBody(block.Body)
+	value, blcfg, err := c.convertBody(block.Body)
+	blcfg["__key__startIndex"] = block.TypeRange.Start.Column // start_column
+	blcfg["__key__endIndex"] = block.TypeRange.End.Column
+	blcfg["__key__line"] = block.TypeRange.Start.Line
+
 	if err != nil {
 		return fmt.Errorf("convert body: %w", err)
 	}
-
-	// Multiple blocks can exist with the same name, at the same
-	// level in the JSON document (e.g. locals).
-	//
-	// For consistency, always wrap the value in a collection.
-	// When multiple values are at the same key
-	if current, exists := out[key]; exists {
-		out[key] = append(current.([]interface{}), value)
+	// resource config for blocks
+	if current, exists := cfg[key]; exists {
+		if list, ok := current.([]interface{}); ok {
+			cfg[key] = append(list, value)
+		} else {
+			cfg[key] = []interface{}{current, value}
+		}
 	} else {
-		out[key] = []interface{}{value}
+		cfg[key] = value
 	}
+
+	// resource line config for blocks
+	if current, exists := lcfg[key]; exists {
+		if list, ok := current.([]interface{}); ok {
+			lcfg[key] = append(list, blcfg)
+		} else {
+			lcfg[key] = []interface{}{current, blcfg}
+		}
+	} else {
+		lcfg[key] = blcfg
+	}
+	// // Multiple blocks can exist with the same name, at the same
+	// // level in the JSON document (e.g. locals).
+	// //
+	// // For consistency, always wrap the value in a collection.
+	// // When multiple values are at the same key
+	// if current, exists := cfg[key]; exists {
+	// 	cfg[key] = append(current.([]interface{}), value)
+	// } else {
+	// 	cfg[key] = []interface{}{value}
+	// }
+
+	// if current, exists := lcfg[key]; exists {
+	// 	lcfg[key] = append(current.([]interface{}), blcfg)
+	// } else {
+	// 	lcfg[key] = []interface{}{blcfg}
+	// }
 
 	return nil
 }
 
-func (c *converter) convertExpression(expr hclsyntax.Expression) (interface{}, error) {
-	if c.options.Simplify {
-		value, err := expr.Value(&evalContext)
-		if err == nil {
-			return ctyjson.SimpleJSONValue{Value: value}, nil
-		}
-	}
+func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{}, line interface{}, err error) {
+	// if c.options.Simplify {
+	// 	value, err := expr.Value(&evalContext)
+	// 	if err == nil {
+	// 		return ctyjson.SimpleJSONValue{Value: value}, nil
+	// 	}
+	// }
+
+	lineInfo := make(map[string]int)
+	lineInfo["line"] = expr.StartRange().Start.Line
+	lineInfo["startIndex"] = expr.StartRange().Start.Column
+	lineInfo["endIndex"] = expr.StartRange().End.Column
+
+	line = lineInfo
 
 	// assume it is hcl syntax (because, um, it is)
 	switch value := expr.(type) {
 	case *hclsyntax.LiteralValueExpr:
-		return ctyjson.SimpleJSONValue{Value: value.Val}, nil
-	case *hclsyntax.UnaryOpExpr:
-		return c.convertUnary(value)
+		return ctyjson.SimpleJSONValue{Value: value.Val}, line, nil
+	// case *hclsyntax.UnaryOpExpr:
+	// 	return c.convertUnary(value)
 	case *hclsyntax.TemplateExpr:
-		return c.convertTemplate(value)
+		ret, err = c.convertTemplate(value)
+		return
 	case *hclsyntax.TemplateWrapExpr:
 		return c.convertExpression(value.Wrapped)
 	case *hclsyntax.TupleConsExpr:
 		list := make([]interface{}, 0)
 		for _, ex := range value.Exprs {
-			elem, err := c.convertExpression(ex)
+			elem, line, err := c.convertExpression(ex)
 			if err != nil {
-				return nil, err
+				return nil, line, err
 			}
 			list = append(list, elem)
 		}
-		return list, nil
+		return list, line, nil
 	case *hclsyntax.ObjectConsExpr:
 		m := make(jsonObj)
+		l := make(lineObj)
 		for _, item := range value.Items {
 			key, err := c.convertKey(item.KeyExpr)
 			if err != nil {
-				return nil, err
+				return nil, line, err
 			}
-			m[key], err = c.convertExpression(item.ValueExpr)
+			m[key], l[key], err = c.convertExpression(item.ValueExpr)
 			if err != nil {
-				return nil, err
+				return nil, line, err
 			}
 		}
-		return m, nil
+		return m, l, nil
 	default:
-		return c.wrapExpr(expr), nil
+		return c.wrapExpr(expr), line, nil
 	}
 }
 
