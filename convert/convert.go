@@ -160,12 +160,12 @@ func (c *converter) convertBlock(block *hclsyntax.Block, out jsonObj) error {
 }
 
 func (c *converter) ConvertExpression(expr hclsyntax.Expression) (interface{}, error) {
-	if c.options.Simplify {
-		value, err := expr.Value(&evalContext)
-		if err == nil {
-			return ctyjson.SimpleJSONValue{Value: value}, nil
-		}
-	}
+	// if c.options.Simplify {
+	// 	value, err := expr.Value(&evalContext)
+	// 	if err == nil {
+	// 		return ctyjson.SimpleJSONValue{Value: value}, nil
+	// 	}
+	// }
 
 	// assume it is hcl syntax (because, um, it is)
 	switch value := expr.(type) {
