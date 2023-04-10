@@ -30,8 +30,8 @@ func String(filename string) (map[string]interface{}, error) {
 
 	//data["json"] = string(converted)
 	//data["lines"] = string(lineInfo)
-	data["json"] = converted
-	data["lines"] = lineInfo
+	data["json"] = string(converted)
+	data["lines"] = string(lineInfo)
 	return data, nil
 
 }
