@@ -28,8 +28,10 @@ func String(filename string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to convert file: %w", err)
 	}
 
-	data["json"] = string(converted)
-	data["lines"] = string(lineInfo)
+	//data["json"] = string(converted)
+	//data["lines"] = string(lineInfo)
+	data["json"] = converted
+	data["lines"] = lineInfo
 	return data, nil
 
 }
