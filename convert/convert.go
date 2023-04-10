@@ -16,6 +16,24 @@ type Options struct {
 	Simplify bool
 }
 
+func String(filename string) (map[string]interface{}, error) {
+	//buffer := bytes.NewBuffer([]byte{})
+	var options Options
+
+	data := make(map[string]interface{})
+
+	converted, lineInfo, err := Bytes([]byte(filename), "", options)
+	if err != nil {
+
+		return nil, fmt.Errorf("failed to convert file: %w", err)
+	}
+
+	data["json"] = string(converted)
+	data["lines"] = string(lineInfo)
+	return data, nil
+
+}
+
 // Bytes takes the contents of an HCL file, as bytes, and converts
 // them into a JSON representation of the HCL file.
 func Bytes(bytes []byte, filename string, options Options) ([]byte, []byte, error) {
