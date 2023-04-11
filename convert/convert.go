@@ -108,6 +108,7 @@ func (c *converter) convertBody(body *hclsyntax.Body) (jsonObj, lineObj, error) 
 			bcfg  = make(jsonObj) // block resource config
 			blcfg = make(lineObj) // block resource line config
 		)
+		blcfg["type"] = "block"
 
 		if err := c.convertBlock(block, bcfg, blcfg); err != nil {
 			return nil, nil, fmt.Errorf("convert block: %w", err)
@@ -145,6 +146,12 @@ func (c *converter) convertBody(body *hclsyntax.Body) (jsonObj, lineObj, error) 
 			l["__key__endIndex"] = value.NameRange.End.Column
 			l["__key__line"] = value.NameRange.Start.Line
 		}
+		int2, e2 := lcfg[key].(map[string]interface{})
+		if e2 {
+			int2["__key__startIndex"] = value.NameRange.Start.Column
+			int2["__key__endIndex"] = value.NameRange.End.Column
+			int2["__key__line"] = value.NameRange.Start.Line
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("convert expression: %w", err)
 		}
@@ -152,6 +159,7 @@ func (c *converter) convertBody(body *hclsyntax.Body) (jsonObj, lineObj, error) 
 	lcfg["line"] = body.SrcRange.Start.Line
 	lcfg["startIndex"] = body.SrcRange.Start.Column
 	lcfg["endIndex"] = body.SrcRange.End.Column
+	lcfg["type"] = "block"
 	return cfg, lcfg, nil
 }
 
@@ -292,17 +300,31 @@ func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{
 		return c.convertExpression(value.Wrapped)
 	case *hclsyntax.TupleConsExpr:
 		list := make([]interface{}, 0)
+		lines := make([]interface{}, 0)
+
+		lineInfo := make(map[string]interface{})
+		lineInfo["line"] = expr.StartRange().Start.Line
+		lineInfo["startIndex"] = expr.StartRange().Start.Column
+		lineInfo["endIndex"] = expr.StartRange().End.Column
+		lineInfo["type"] = "array"
 		for _, ex := range value.Exprs {
 			elem, line, err := c.convertExpression(ex)
 			if err != nil {
 				return nil, line, err
 			}
 			list = append(list, elem)
+			lines = append(lines, line)
 		}
+		lineInfo["lines"] = lines
+		line = lineInfo
 		return list, line, nil
 	case *hclsyntax.ObjectConsExpr:
 		m := make(jsonObj)
 		l := make(lineObj)
+		l["type"] = "object"
+		l["line"] = value.SrcRange.Start.Line
+		l["startIndex"] = value.SrcRange.Start.Column
+		l["endIndex"] = value.SrcRange.End.Column
 		for _, item := range value.Items {
 			key, err := c.convertKey(item.KeyExpr)
 			if err != nil {
