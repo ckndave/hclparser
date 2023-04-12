@@ -160,6 +160,7 @@ func (c *converter) convertBody(body *hclsyntax.Body) (jsonObj, lineObj, error) 
 	lcfg["startIndex"] = body.SrcRange.Start.Column
 	lcfg["endIndex"] = body.SrcRange.End.Column
 	lcfg["type"] = "block"
+	lcfg["endLine"] = body.SrcRange.End.Line
 	return cfg, lcfg, nil
 }
 
@@ -227,6 +228,9 @@ func (c *converter) convertBlock(block *hclsyntax.Block, cfg jsonObj, lcfg lineO
 	blcfg["__key__startIndex"] = block.TypeRange.Start.Column // start_column
 	blcfg["__key__endIndex"] = block.TypeRange.End.Column
 	blcfg["__key__line"] = block.TypeRange.Start.Line
+	if len(block.LabelRanges) > 0 {
+		blcfg["__key__endIndex"] = block.LabelRanges[len(block.LabelRanges)-1].End.Column
+	}
 
 	if err != nil {
 		return fmt.Errorf("convert body: %w", err)
@@ -284,6 +288,7 @@ func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{
 	lineInfo["line"] = expr.StartRange().Start.Line
 	lineInfo["startIndex"] = expr.StartRange().Start.Column
 	lineInfo["endIndex"] = expr.StartRange().End.Column
+	lineInfo["endLine"] = expr.StartRange().End.Line
 
 	line = lineInfo
 
@@ -306,6 +311,7 @@ func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{
 		lineInfo["line"] = expr.StartRange().Start.Line
 		lineInfo["startIndex"] = expr.StartRange().Start.Column
 		lineInfo["endIndex"] = expr.StartRange().End.Column
+		lineInfo["endLine"] = expr.StartRange().End.Line
 		lineInfo["type"] = "array"
 		for _, ex := range value.Exprs {
 			elem, line, err := c.convertExpression(ex)
@@ -325,6 +331,7 @@ func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{
 		l["line"] = value.SrcRange.Start.Line
 		l["startIndex"] = value.SrcRange.Start.Column
 		l["endIndex"] = value.SrcRange.End.Column
+		l["endLine"] = value.SrcRange.End.Line
 		for _, item := range value.Items {
 			key, err := c.convertKey(item.KeyExpr)
 			if err != nil {
