@@ -19,6 +19,7 @@ type Options struct {
 func String(filename string) (map[string]interface{}, error) {
 	//buffer := bytes.NewBuffer([]byte{})
 	var options Options
+	options = Options{Simplify: true}
 
 	data := make(map[string]interface{})
 
@@ -277,12 +278,6 @@ func (c *converter) convertBlock(block *hclsyntax.Block, cfg jsonObj, lcfg lineO
 }
 
 func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{}, line interface{}, err error) {
-	// if c.options.Simplify {
-	// 	value, err := expr.Value(&evalContext)
-	// 	if err == nil {
-	// 		return ctyjson.SimpleJSONValue{Value: value}, nil
-	// 	}
-	// }
 
 	lineInfo := make(map[string]int)
 	lineInfo["line"] = expr.StartRange().Start.Line
@@ -291,6 +286,13 @@ func (c *converter) convertExpression(expr hclsyntax.Expression) (ret interface{
 	lineInfo["endLine"] = expr.StartRange().End.Line
 
 	line = lineInfo
+
+	if c.options.Simplify {
+		value, err := expr.Value(&evalContext)
+		if err == nil {
+			return ctyjson.SimpleJSONValue{Value: value}, line, nil
+		}
+	}
 
 	// assume it is hcl syntax (because, um, it is)
 	switch value := expr.(type) {
